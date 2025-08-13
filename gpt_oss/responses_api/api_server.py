@@ -64,10 +64,11 @@ DEFAULT_TEMPERATURE = 0.0
 def get_reasoning_effort(effort: Literal["low", "medium", "high"]) -> ReasoningEffort:
     if effort == "low":
         return ReasoningEffort.LOW
-    elif effort == "medium":
+    if effort == "medium":
         return ReasoningEffort.MEDIUM
-    elif effort == "high":
+    if effort == "high":
         return ReasoningEffort.HIGH
+    raise ValueError(f"Invalid reasoning effort: {effort}")
 
 
 def is_not_builtin_tool(recipient: str) -> bool:
@@ -784,7 +785,12 @@ def create_api_server(
         )
         
         if body.reasoning is not None:
-            reasoning_effort = get_reasoning_effort(body.reasoning.effort)
+            try:
+
+                reasoning_effort = get_reasoning_effort(body.reasoning.effect)
+            except ValueError as e:
+                from fastapi import HTTP Exception
+                raise HTTPException(status_code=422, detail=str(e))
             system_message_content = system_message_content.with_reasoning_effort(reasoning_effort)
 
         if use_browser_tool:
@@ -793,16 +799,16 @@ def create_api_server(
         system_message = Message.from_role_and_content(
             Role.SYSTEM, system_message_content
         )
+        messages = [system_message]
 
-        developer_message_content = DeveloperContent.new().with_instructions(
-            body.instructions
-        )
+        if body.instructions or body.tools:
+            developer_message_content = DeveloperContent.new().with_instructions(
+                body.instructions
+            )
 
-        tools = []
-        if body.tools:
+            tools = []
             for tool in body.tools:
                 if tool.type == "function":
-                    has_functions = True
                     tools.append(
                         ToolDescription.new(
                             tool.name,
@@ -810,17 +816,17 @@ def create_api_server(
                             tool.parameters,
                         )
                     )
-        
-        if len(tools) > 0:
-            developer_message_content = developer_message_content.with_function_tools(
-                tools
+
+            if tools:
+                developer_message_content = developer_message_content.with_function_tools(
+                    tools
+                )
+
+            developer_message = Message.from_role_and_content(
+                Role.DEVELOPER, developer_message_content
             )
 
-        developer_message = Message.from_role_and_content(
-            Role.DEVELOPER, developer_message_content
-        )
-
-        messages = [system_message, developer_message]
+            messages.append(developer_message)
 
         if isinstance(body.input, str):
             user_message = Message.from_role_and_content(Role.USER, body.input)
